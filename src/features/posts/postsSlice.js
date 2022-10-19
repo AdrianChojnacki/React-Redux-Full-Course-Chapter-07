@@ -53,10 +53,9 @@ export const extendedApiSlice = apiSlice.injectEndpoints({
         });
         return postsAdapter.setAll(initialState, loadedPosts);
       },
-      providesTags: (result, error, arg) => {
-        console.log(result);
-        return [...result.ids.map((id) => ({ type: "Post", id }))];
-      },
+      providesTags: (result, error, arg) => [
+        ...result.ids.map((id) => ({ type: "Post", id })),
+      ],
     }),
     addNewPost: builder.mutation({
       query: (initialPost) => ({
@@ -79,7 +78,7 @@ export const extendedApiSlice = apiSlice.injectEndpoints({
     }),
     updatePost: builder.mutation({
       query: (initialPost) => ({
-        url: `posts/${initialPost.id}`,
+        url: `/posts/${initialPost.id}`,
         method: "PUT",
         body: {
           ...initialPost,
@@ -90,11 +89,43 @@ export const extendedApiSlice = apiSlice.injectEndpoints({
     }),
     deletePost: builder.mutation({
       query: ({ id }) => ({
-        url: `posts/${id}`,
+        url: `/posts/${id}`,
         method: "DELETE",
         body: { id },
       }),
       invalidatesTags: (result, error, arg) => [{ type: "Post", id: arg.id }],
+    }),
+    addReaction: builder.mutation({
+      query: ({ postId, reactions }) => ({
+        url: `posts/${postId}`,
+        method: "PATCH",
+        // In a real app, we'd probably need to base this on user ID somehow
+        // so that a user can't do the same reaction more than once
+        body: { reactions },
+      }),
+      async onQueryStarted(
+        { postId, reactions },
+        { dispatch, queryFulfilled }
+      ) {
+        // `updateQueryData` requires the endpoint name and cache key arguments,
+        // so it knows which piece of cache state to update
+        const patchResult = dispatch(
+          extendedApiSlice.util.updateQueryData(
+            "getPosts",
+            undefined,
+            (draft) => {
+              // The `draft` is Immer-wrapped and can be "mutated" like in createSlice
+              const post = draft.entities[postId];
+              if (post) post.reactions = reactions;
+            }
+          )
+        );
+        try {
+          await queryFulfilled;
+        } catch {
+          patchResult.undo();
+        }
+      },
     }),
   }),
 });
@@ -105,9 +136,10 @@ export const {
   useAddNewPostMutation,
   useUpdatePostMutation,
   useDeletePostMutation,
+  useAddReactionMutation,
 } = extendedApiSlice;
 
-// Returns the query result object
+// returns the query result object
 export const selectPostsResult = extendedApiSlice.endpoints.getPosts.select();
 
 // Creates memoized selector
@@ -116,7 +148,7 @@ const selectPostsData = createSelector(
   (postsResult) => postsResult.data // normalized state object with ids & entities
 );
 
-// getSelectors creates these selectors and we rename them with aliases using destructuring
+//getSelectors creates these selectors and we rename them with aliases using destructuring
 export const {
   selectAll: selectAllPosts,
   selectById: selectPostById,
